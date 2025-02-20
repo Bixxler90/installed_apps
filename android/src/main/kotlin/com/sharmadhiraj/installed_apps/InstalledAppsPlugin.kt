@@ -15,51 +15,40 @@ import com.sharmadhiraj.installed_apps.Util.Companion.getPackageManager
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
-import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.MethodChannel.MethodCallHandler
-import io.flutter.plugin.common.PluginRegistry.Registrar
 import java.util.Locale.ENGLISH
 
+class InstalledAppsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware {
 
-class InstalledAppsPlugin() : MethodCallHandler, FlutterPlugin, ActivityAware {
-
-    companion object {
-
-        var context: Context? = null
-
-        @JvmStatic
-        fun registerWith(registrar: Registrar) {
-            context = registrar.context()
-            register(registrar.messenger())
-        }
-
-        @JvmStatic
-        fun register(messenger: BinaryMessenger) {
-            val channel = MethodChannel(messenger, "installed_apps")
-            channel.setMethodCallHandler(InstalledAppsPlugin())
-        }
-    }
+    private lateinit var channel: MethodChannel
+    private var context: Context? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        register(binding.binaryMessenger)
+        channel = MethodChannel(binding.binaryMessenger, "installed_apps")
+        channel.setMethodCallHandler(this)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        channel.setMethodCallHandler(null)
     }
 
-    override fun onAttachedToActivity(activityPluginBinding: ActivityPluginBinding) {
-        context = activityPluginBinding.activity
+    // ActivityAware-Implementierung:
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        context = binding.activity
     }
 
-    override fun onDetachedFromActivityForConfigChanges() {}
-
-    override fun onReattachedToActivityForConfigChanges(activityPluginBinding: ActivityPluginBinding) {
-        context = activityPluginBinding.activity
+    override fun onDetachedFromActivity() {
+        context = null
     }
 
-    override fun onDetachedFromActivity() {}
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        context = binding.activity
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        context = null
+    }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         if (context == null) {
@@ -68,52 +57,43 @@ class InstalledAppsPlugin() : MethodCallHandler, FlutterPlugin, ActivityAware {
         }
         when (call.method) {
             "getInstalledApps" -> {
-                val includeSystemApps = call.argument("exclude_system_apps") ?: true
-                val withIcon = call.argument("with_icon") ?: false
-                val packageNamePrefix: String = call.argument("package_name_prefix") ?: ""
+                val includeSystemApps = call.argument<Boolean>("exclude_system_apps") ?: true
+                val withIcon = call.argument<Boolean>("with_icon") ?: false
+                val packageNamePrefix: String = call.argument<String>("package_name_prefix") ?: ""
                 Thread {
-                    val apps: List<Map<String, Any?>> =
-                        getInstalledApps(includeSystemApps, withIcon, packageNamePrefix)
+                    val apps: List<Map<String, Any?>> = getInstalledApps(includeSystemApps, withIcon, packageNamePrefix)
                     result.success(apps)
                 }.start()
             }
-
             "startApp" -> {
                 val packageName: String? = call.argument("package_name")
                 result.success(startApp(packageName))
             }
-
             "openSettings" -> {
                 val packageName: String? = call.argument("package_name")
                 openSettings(packageName)
             }
-
             "toast" -> {
-                val message = call.argument("message") ?: ""
-                val short = call.argument("short_length") ?: true
+                val message = call.argument<String>("message") ?: ""
+                val short = call.argument<Boolean>("short_length") ?: true
                 toast(message, short)
             }
-
             "getAppInfo" -> {
                 val packageName: String = call.argument("package_name") ?: ""
                 result.success(getAppInfo(getPackageManager(context!!), packageName))
             }
-
             "isSystemApp" -> {
                 val packageName: String = call.argument("package_name") ?: ""
                 result.success(isSystemApp(getPackageManager(context!!), packageName))
             }
-
             "uninstallApp" -> {
                 val packageName: String = call.argument("package_name") ?: ""
                 result.success(uninstallApp(packageName))
             }
-
             "isAppInstalled" -> {
                 val packageName: String = call.argument("package_name") ?: ""
                 result.success(isAppInstalled(packageName))
             }
-
             else -> result.notImplemented()
         }
     }
@@ -126,13 +106,10 @@ class InstalledAppsPlugin() : MethodCallHandler, FlutterPlugin, ActivityAware {
         val packageManager = getPackageManager(context!!)
         var installedApps = packageManager.getInstalledApplications(0)
         if (excludeSystemApps)
-            installedApps =
-                installedApps.filter { app -> !isSystemApp(packageManager, app.packageName) }
+            installedApps = installedApps.filter { app -> !isSystemApp(packageManager, app.packageName) }
         if (packageNamePrefix.isNotEmpty())
             installedApps = installedApps.filter { app ->
-                app.packageName.startsWith(
-                    packageNamePrefix.lowercase(ENGLISH)
-                )
+                app.packageName.startsWith(packageNamePrefix.lowercase(ENGLISH))
             }
         return installedApps.map { app -> convertAppToMap(packageManager, app, withIcon) }
     }
@@ -144,14 +121,13 @@ class InstalledAppsPlugin() : MethodCallHandler, FlutterPlugin, ActivityAware {
             context!!.startActivity(launchIntent)
             true
         } catch (e: Exception) {
-            print(e)
+            e.printStackTrace()
             false
         }
     }
 
     private fun toast(text: String, short: Boolean) {
-        Toast.makeText(context!!, text, if (short) LENGTH_SHORT else LENGTH_LONG)
-            .show()
+        Toast.makeText(context!!, text, if (short) LENGTH_SHORT else LENGTH_LONG).show()
     }
 
     private fun isSystemApp(packageManager: PackageManager, packageName: String): Boolean {
@@ -165,8 +141,8 @@ class InstalledAppsPlugin() : MethodCallHandler, FlutterPlugin, ActivityAware {
 
     private fun openSettings(packageName: String?) {
         if (!isAppInstalled(packageName)) {
-            print("App $packageName is not installed on this device.")
-            return;
+            println("App $packageName is not installed on this device.")
+            return
         }
         val intent = Intent().apply {
             flags = FLAG_ACTIVITY_NEW_TASK
@@ -197,7 +173,6 @@ class InstalledAppsPlugin() : MethodCallHandler, FlutterPlugin, ActivityAware {
         }
     }
 
-
     private fun isAppInstalled(packageName: String?): Boolean {
         val packageManager: PackageManager = context!!.packageManager
         return try {
@@ -207,5 +182,4 @@ class InstalledAppsPlugin() : MethodCallHandler, FlutterPlugin, ActivityAware {
             false
         }
     }
-
 }
